@@ -6,36 +6,65 @@ from email.message import EmailMessage
 
 app = FastAPI()
 
-API_KEY = os.getenv("API_KEY", "")
+# =========================
+# CONFIG (ENV)
+# =========================
+API_KEY     = os.getenv("API_KEY", "")
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASS = os.getenv("SMTP_PASS", "")
-MAIL_TO = os.getenv("MAIL_TO", "")
+SMTP_PORT   = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER   = os.getenv("SMTP_USER", "")
+SMTP_PASS   = os.getenv("SMTP_PASS", "")
+MAIL_TO     = os.getenv("MAIL_TO", "")
 
+# =========================
+# MODEL
+# =========================
 class DiagnosticPayload(BaseModel):
     computer_name: str
     username: str
     app_version: str
     report: str
 
+# =========================
+# ROOT CHECK
+# =========================
 @app.get("/")
 def root():
     return {"status": "ok"}
 
+# =========================
+# SEND DIAGNOSTIC
+# =========================
 @app.post("/api/diagnostic")
-def receive_diagnostic(payload: DiagnosticPayload, x_api_key: str | None = Header(default=None)):
+def receive_diagnostic(
+    payload: DiagnosticPayload,
+    x_api_key: str | None = Header(default=None)
+):
+    print("===== NEW REQUEST =====")
+
+    # 🔐 CHECK API KEY
     if not API_KEY or x_api_key != API_KEY:
+        print("❌ API KEY INVALID")
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    print("✅ API KEY OK")
+
+    # ⚠️ CHECK SMTP CONFIG
     if not SMTP_USER or not SMTP_PASS or not MAIL_TO:
+        print("❌ SMTP CONFIG INCOMPLETE")
         raise HTTPException(status_code=500, detail="SMTP configuration incomplete")
 
-    subject = f"Diagnostic PC - {payload.computer_name} - version {payload.app_version}"
+    print(f"SMTP_USER={SMTP_USER}")
+    print(f"MAIL_TO={MAIL_TO}")
+    print(f"SMTP_SERVER={SMTP_SERVER}:{SMTP_PORT}")
+
+    # 📧 BUILD MAIL
+    subject = f"Diagnostic PC - {payload.computer_name} - v{payload.app_version}"
+
     body = (
         f"Nom du poste : {payload.computer_name}\n"
         f"Utilisateur  : {payload.username}\n"
-        f"Version outil : {payload.app_version}\n\n"
+        f"Version outil: {payload.app_version}\n\n"
         f"{payload.report}"
     )
 
@@ -45,14 +74,28 @@ def receive_diagnostic(payload: DiagnosticPayload, x_api_key: str | None = Heade
     msg["Subject"] = subject
     msg.set_content(body)
 
+    # 🚀 SEND MAIL
     try:
+        print("📡 Connexion SMTP...")
+
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as smtp:
             smtp.ehlo()
             smtp.starttls()
             smtp.ehlo()
+
+            print("🔐 Login SMTP...")
             smtp.login(SMTP_USER, SMTP_PASS)
+
+            print("📨 Envoi du mail...")
             smtp.send_message(msg)
+
+        print("✅ MAIL SENT")
+
     except Exception as exc:
+        print(f"🔥 SMTP ERROR: {exc}")
         raise HTTPException(status_code=500, detail=f"Mail send failed: {exc}")
 
-    return {"success": True, "message": "Diagnostic reçu et mail envoyé"}
+    return {
+        "success": True,
+        "message": "Diagnostic reçu et mail envoyé"
+    }
